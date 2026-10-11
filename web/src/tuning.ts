@@ -64,10 +64,18 @@ export const TUNING = {
     blossomBurst: 6, // sparkles a blossom releases when it opens
   },
   forest: {
-    maxSegments: 80000,
-    maxLeaves: 120000,
-    maxPetals: 90000,
-    maxCores: 18000,
+    // Level of detail, by distance from the camera to a plant's root, in world units.
+    // Full detail (every branch, leaf and petal) reaches as far as this many of its triangles
+    // drawn per frame allow, but always within this range of distances.
+    nearBudget: 200000,
+    nearRadius: { min: 4, max: 14 }, // the camera rides about 7 above the ground, so 4 can mean none
+    midRadius: 24, // limbs and small leaf clumps inside; beyond, trunks, big clumps and blossom points
+    nearChunk: 6, // side of the meadow patches whose full detail is built and freed together
+    midChunk: 16, // ...whose mid detail is drawn and culled together
+    farChunk: 40, // ...and whose far detail is; big, since from afar it is all in view anyway
+    prefetch: 6, // full detail is built this far beyond the near radius, before it is needed
+    evictMargin: 6, // and freed only this much further out, so it doesn't thrash at the edge
+    buildBudgetMs: 3, // time per frame spent regenerating full detail
   },
   ground: {
     size: 8000, // big enough that its edge sits behind the distant hills

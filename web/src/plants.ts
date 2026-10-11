@@ -16,6 +16,7 @@ export interface Segment {
   radius: number;
   birth: number;
   duration: number;
+  depth: number; // branching order: 0 for a tree's trunk, higher for finer twigs
 }
 
 export interface Leaf {
@@ -84,8 +85,9 @@ const SHAPES: Record<PlantKind, Shape> = {
 };
 
 const UP = new THREE.Vector3(0, 1, 0);
-const rand = (a: number, b: number): number => a + Math.random() * (b - a);
-const pick = <T>(xs: readonly T[]): T => xs[Math.floor(Math.random() * xs.length)];
+
+/** A source of uniform numbers in [0, 1). Seeded, so a plan can be regenerated exactly. */
+export type Random = () => number;
 
 /** A direction `angle` radians away from `axis`, turned `azimuth` radians around it. */
 export function spread(axis: THREE.Vector3, angle: number, azimuth: number, out = new THREE.Vector3()): THREE.Vector3 {
@@ -100,7 +102,21 @@ export function spread(axis: THREE.Vector3, angle: number, azimuth: number, out 
     .normalize();
 }
 
-export function generatePlant(kind: PlantKind): PlantPlan {
+/** A uniformly random unit vector. */
+function randomDirection(random: Random): THREE.Vector3 {
+  const z = random() * 2 - 1;
+  const a = random() * Math.PI * 2;
+  const r = Math.sqrt(1 - z * z);
+  return new THREE.Vector3(r * Math.cos(a), r * Math.sin(a), z);
+}
+
+/**
+ * Generates a whole plant. Every random choice comes from `random`, so the same seed always
+ * yields the same plant: the renderer keeps only the seed and regenerates detail on demand.
+ */
+export function generatePlant(kind: PlantKind, random: Random): PlantPlan {
+  const rand = (a: number, b: number): number => a + random() * (b - a);
+  const pick = <T>(xs: readonly T[]): T => xs[Math.floor(random() * xs.length)];
   const shape = SHAPES[kind];
   const g = TUNING.growth;
   const plan: PlantPlan = { kind, segments: [], leaves: [], blossoms: [], end: 0, footprint: 0 };
@@ -124,14 +140,14 @@ export function generatePlant(kind: PlantKind): PlantPlan {
     const subLength = length / shape.subdivisions;
     for (let i = 0; i < shape.subdivisions; i++) {
       d = d.clone()
-        .add(new THREE.Vector3().randomDirection().multiplyScalar(shape.wobble))
+        .add(randomDirection(random).multiplyScalar(shape.wobble))
         .addScaledVector(UP, shape.tropism)
         .normalize();
       const duration = subLength / g.extendSpeed;
       const r = radius * (1 - (0.35 * i) / shape.subdivisions);
       plan.segments.push({
         start: p.clone(), dir: d, quat: new THREE.Quaternion().setFromUnitVectors(UP, d),
-        length: subLength, radius: r, birth: t, duration,
+        length: subLength, radius: r, birth: t, duration, depth,
       });
       if (depth >= shape.leafFromDepth) {
         for (let k = 0; k < shape.leavesPerSegment; k++) {
@@ -139,7 +155,7 @@ export function generatePlant(kind: PlantKind): PlantPlan {
           addLeaf(p.clone().addScaledVector(d, subLength * f), d, t + duration * f);
         }
       }
-      if (depth < shape.maxDepth && i > 0 && Math.random() < shape.lateralChance) {
+      if (depth < shape.maxDepth && i > 0 && random() < shape.lateralChance) {
         const f = rand(0.3, 0.8);
         branch(
           p.clone().addScaledVector(d, subLength * f), spread(d, shape.childAngle * 1.2, rand(0, Math.PI * 2)),
@@ -159,7 +175,7 @@ export function generatePlant(kind: PlantKind): PlantPlan {
         branch(p, spread(d, shape.childAngle * rand(0.8, 1.2), az), length * shape.lengthRatio,
           radius * shape.radiusRatio, depth + 1, t);
       }
-    } else if (Math.random() < shape.blossomChance) {
+    } else if (random() < shape.blossomChance) {
       plan.blossoms.push({
         at: p.clone(), axis: d, birth: t,
         petals: kind === 'flower' ? 7 : 5,

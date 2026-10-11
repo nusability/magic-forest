@@ -101,6 +101,7 @@ function burst(at: THREE.Vector3, color: THREE.Color, count: number): void {
 
 const forest = new Forest((at, color) => burst(at, color, TUNING.growth.blossomBurst));
 scene.add(forest.group);
+forest.viewer = camera; // the forest picks each plant's level of detail for this camera
 
 // Sparkles that land on your own forest feed it and fill its gaps; elsewhere they only glow.
 const sparkles = new Sparkles((x, z, vigour) => {

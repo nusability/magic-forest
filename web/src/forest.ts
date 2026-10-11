@@ -1,151 +1,191 @@
 import * as THREE from 'three';
-import { generatePlant, spread, type PlantKind, type PlantPlan } from './plants';
+import { generatePlant, type PlantKind, type PlantPlan } from './plants';
 import { TUNING } from './tuning';
+import { barkGeometry, clumpGeometry, coreGeometry, leafGeometry, petalGeometry } from './forest/geometry';
+import {
+  barkMaterial, blossomPointMaterial, clumpMaterial, coreMaterial, leafMaterial, petalMaterial, type Band, type SharedUniforms,
+} from './forest/materials';
+import { FarParts, MidParts, NearParts, type Materials, type Placement, type Shapes } from './forest/parts';
+import { newSeed, seededRandom } from './forest/random';
+import { PlantStates } from './forest/states';
 
-const UP = new THREE.Vector3(0, 1, 0);
-const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+// The magic forest: thousands of plants that grow the way living things do.
+//
+// Each plant is stored as little more than its seed, its place and its age. Growth runs on the
+// GPU from a texture of ages (see forest/materials.ts). The meadow is cut into chunks of three
+// sizes, one per level of detail:
+//  - near chunks, close to the camera, regenerate their plants' full plans from the seeds and
+//    draw every branch, leaf and petal; they are built a few plants per frame as the camera
+//    approaches and freed behind it. How far full detail reaches adapts each frame to a
+//    triangle budget, so a sparse meadow shows it far out and a dense forest keeps it close;
+//  - mid chunks hold limbs and small leaf clumps, and far chunks trunks, big leaf clumps and
+//    blossom points, all written once at seeding. Far chunks are big, since from afar they are
+//    all in view anyway and each costs draw calls.
+// Each instance knows its distance band, so a plant shows exactly one level of detail, and
+// chunks outside the view or outside every band they hold are not drawn at all.
+
 const BARK_COLORS = [0x6b4a7a, 0x5a3f6e, 0x7a5a6a, 0x4f4a78];
-const BUD_ANGLE = 0.12; // radians a closed petal leans out from the blossom's axis
-const BUD_SHARE = 0.45; // a swollen bud's size as a share of the open blossom
-const PETAL_GLOW = { bud: 0.5, open: 1.15 }; // colour multipliers; above 1 feeds the bloom pass
-const CORE_GLOW = 1.8;
-const CORE_SHARE = 0.22;
-const OPEN_ANGLE: Record<PlantKind, number> = { tree: 1.25, shrub: 1.2, flower: 1.05 };
-
-const clamp01 = (x: number): number => Math.min(Math.max(x, 0), 1);
-const smooth = (x: number): number => x * x * (3 - 2 * x);
-const easeOutCubic = (x: number): number => 1 - (1 - x) ** 3;
-const easeOutBack = (x: number): number => 1 + 2.2 * (x - 1) ** 3 + 1.2 * (x - 1) ** 2;
-
-/** One InstancedMesh with a bump allocator. Plants are never freed in the sketch. */
-class Pool {
-  readonly mesh: THREE.InstancedMesh;
-  private used = 0;
-  private readonly matrices: Float32Array;
-  private readonly colors: Float32Array;
-
-  constructor(geometry: THREE.BufferGeometry, material: THREE.Material, readonly capacity: number) {
-    this.mesh = new THREE.InstancedMesh(geometry, material, capacity);
-    this.mesh.count = 0;
-    this.mesh.frustumCulled = false;
-    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.matrices = this.mesh.instanceMatrix.array as Float32Array;
-    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);
-    this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
-    this.colors = this.mesh.instanceColor.array as Float32Array;
-  }
-
-  fits(n: number): boolean {
-    return this.used + n <= this.capacity;
-  }
-
-  alloc(n: number): number {
-    if (!this.fits(n)) throw new Error(`Pool overflow: ${this.used} + ${n} > ${this.capacity}`);
-    const base = this.used;
-    this.used += n;
-    this.mesh.count = this.used;
-    for (let i = base; i < this.used; i++) ZERO.toArray(this.matrices, i * 16);
-    return base;
-  }
-
-  setMatrix(i: number, m: THREE.Matrix4): void {
-    m.toArray(this.matrices, i * 16);
-  }
-
-  setColor(i: number, c: THREE.Color, intensity = 1): void {
-    this.colors[i * 3] = c.r * intensity;
-    this.colors[i * 3 + 1] = c.g * intensity;
-    this.colors[i * 3 + 2] = c.b * intensity;
-  }
-
-  markDirty(base: number, n: number): void {
-    if (n === 0) return;
-    this.mesh.instanceMatrix.addUpdateRange(base * 16, n * 16);
-    this.mesh.instanceMatrix.needsUpdate = true;
-    const colors = this.mesh.instanceColor;
-    if (!colors) throw new Error('Pool mesh lost its instance colours');
-    colors.addUpdateRange(base * 3, n * 3);
-    colors.needsUpdate = true;
-  }
-}
+const BLOSSOM_RECORD = 7; // floats per pending blossom: open time, world x y z, colour r g b
+// Chunk visibility is chosen from the camera's position at update time, before main moves the
+// camera for this frame; this covers how far it can move in one (clamped) frame.
+const CAMERA_STEP_SLACK = 2;
+const LAND_CELL = 4; // side of the cells that find which plant a landing sparkle fell on
+// The near radius shrinks at once when detail gets too dense, and grows back this fast (world
+// units per second), so plants don't flicker between levels at a boundary that jitters.
+const NEAR_RADIUS_GROWTH = 3;
 
 interface Plant {
-  plan: PlantPlan;
+  index: number;
+  seed: number;
+  kind: PlantKind;
   x: number;
   z: number;
-  transform: THREE.Matrix4; // plant space -> world
+  yaw: number;
+  bark: THREE.Color;
   age: number;
   boost: number;
-  segBase: number;
-  leafBase: number;
-  petalBase: number;
-  coreBase: number;
-  petalCount: number;
+  end: number;
+  footprint: number;
+  bounds: THREE.Sphere; // fully grown, world space
+  cost: number; // triangles of its full detail
+  blossoms: Float32Array | null; // blossoms yet to open, sorted by open time
+  nextBlossom: number; // offset of the next one to open
 }
 
-function cuppedShape(shape: THREE.Shape, cup: number): THREE.BufferGeometry {
-  const geometry = new THREE.ShapeGeometry(shape, 6);
-  const pos = geometry.attributes.position;
-  for (let i = 0; i < pos.count; i++) pos.setZ(i, -cup * pos.getX(i) ** 2);
-  geometry.computeVertexNormals();
-  return geometry;
+class NearChunk {
+  readonly plants: Plant[] = [];
+  cost = 0; // triangles of its plants' full detail
+  readonly box = new THREE.Box3(); // everything its plants draw, fully grown: for culling
+  // Its plants' roots. The shaders pick a plant's detail by its root's distance, so the distance
+  // to these is what says whether any plant here can show full detail.
+  readonly roots = new THREE.Box3();
+  parts: NearParts | null = null;
+  built = 0; // plants whose full detail is written, in order
+  distance = Infinity; // from the camera to the nearest root, at the last update
 }
 
-function leafGeometry(): THREE.BufferGeometry {
-  const s = new THREE.Shape();
-  s.moveTo(0, 0);
-  s.quadraticCurveTo(0.38, 0.4, 0, 1);
-  s.quadraticCurveTo(-0.38, 0.4, 0, 0);
-  return cuppedShape(s, 0.9);
+class Chunk<T> {
+  readonly box = new THREE.Box3();
+  constructor(readonly parts: T) {}
 }
 
-function petalGeometry(): THREE.BufferGeometry {
-  const s = new THREE.Shape();
-  s.moveTo(0, 0);
-  s.bezierCurveTo(0.5, 0.3, 0.42, 0.95, 0, 1);
-  s.bezierCurveTo(-0.42, 0.95, -0.5, 0.3, 0, 0);
-  return cuppedShape(s, 1.2);
+/** Square cells over the ground, created on first use. */
+class Grid<T> {
+  private readonly cells = new Map<string, T>();
+  constructor(private readonly size: number, private readonly make: () => T) {}
+
+  at(x: number, z: number): T {
+    return this.cell(Math.floor(x / this.size), Math.floor(z / this.size));
+  }
+
+  cell(i: number, j: number): T {
+    const key = `${i},${j}`;
+    let c = this.cells.get(key);
+    if (!c) this.cells.set(key, (c = this.make()));
+    return c;
+  }
+
+  peek(i: number, j: number): T | undefined {
+    return this.cells.get(`${i},${j}`);
+  }
+
+  values(): IterableIterator<T> {
+    return this.cells.values();
+  }
+}
+
+/** The plant's fully grown reach around its root and its height, from its plan. */
+function extent(plan: PlantPlan): { reach: number; height: number } {
+  let reach = 0;
+  let height = 0;
+  const visit = (x: number, y: number, z: number, pad: number): void => {
+    reach = Math.max(reach, Math.hypot(x, z) + pad);
+    height = Math.max(height, y + pad);
+  };
+  for (const s of plan.segments) {
+    visit(s.start.x, s.start.y, s.start.z, s.radius);
+    visit(s.start.x + s.dir.x * s.length, s.start.y + s.dir.y * s.length, s.start.z + s.dir.z * s.length, s.radius);
+  }
+  for (const l of plan.leaves) visit(l.at.x, l.at.y, l.at.z, l.size);
+  for (const b of plan.blossoms) visit(b.at.x, b.at.y, b.at.z, b.size);
+  return { reach, height };
+}
+
+/** Distance from `p` to the farthest point of `box`. */
+function farthest(box: THREE.Box3, p: THREE.Vector3): number {
+  return Math.hypot(
+    Math.max(p.x - box.min.x, box.max.x - p.x),
+    Math.max(p.y - box.min.y, box.max.y - p.y),
+    Math.max(p.z - box.min.z, box.max.z - p.z),
+  );
 }
 
 export class Forest {
   readonly group = new THREE.Group();
-  private readonly segments: Pool;
-  private readonly leaves: Pool;
-  private readonly petals: Pool;
-  private readonly cores: Pool;
+  /** The camera the level of detail is chosen for. Set it before the first update. */
+  viewer: THREE.Camera | null = null;
   private readonly plants: Plant[] = [];
   private growing: Plant[] = [];
-  private warnedFull = false;
+  private readonly states = new PlantStates();
+  private readonly materials: Materials;
+  private readonly shapes: Shapes;
+  private readonly pixelScale = { value: 1 };
+  private readonly near = new Grid(TUNING.forest.nearChunk, () => new NearChunk());
+  private readonly mid = new Grid(TUNING.forest.midChunk, () => this.newChunk(new MidParts(this.materials, this.shapes)));
+  private readonly far = new Grid(TUNING.forest.farChunk,
+    () => this.newChunk(new FarParts(this.materials, this.shapes, (renderer) => this.updatePixelScale(renderer))));
+  private readonly landCells = new Grid<Plant[]>(LAND_CELL, () => []);
+  private maxFootprint = 0;
+  // The near radius moves with how dense the forest around the camera is: full detail reaches as
+  // far as its triangle budget allows. The bands are shared by every material that uses them.
+  private nearRadius: number = TUNING.forest.nearRadius.min;
+  private readonly uNearRadius = { value: this.nearRadius };
+  private readonly nearBand: Band = { value: new THREE.Vector2(0, this.nearRadius) };
+  private readonly midBand: Band = { value: new THREE.Vector2(this.nearRadius, TUNING.forest.midRadius) };
+  private readonly beyondBand: Band = { value: new THREE.Vector2(TUNING.forest.midRadius, Infinity) };
+  private readonly farBand: Band = { value: new THREE.Vector2(this.nearRadius, Infinity) };
+  private readonly frustum = new THREE.Frustum();
+  private readonly viewProjection = new THREE.Matrix4();
+  private readonly partTriangles: { bark: number; leaf: number; petal: number; core: number };
   // Scratch objects, reused every frame.
-  private readonly m = new THREE.Matrix4();
-  private readonly q = new THREE.Quaternion();
-  private readonly q2 = new THREE.Quaternion();
+  private readonly eye = new THREE.Vector3();
   private readonly v = new THREE.Vector3();
-  private readonly s = new THREE.Vector3();
-  private readonly dir = new THREE.Vector3();
   private readonly color = new THREE.Color();
-  private readonly white = new THREE.Color(1, 1, 1);
+  private readonly drawingBuffer = new THREE.Vector2();
 
   constructor(private readonly onBlossomOpen: (at: THREE.Vector3, color: THREE.Color) => void) {
-    const f = TUNING.forest;
-    this.segments = new Pool(
-      new THREE.CylinderGeometry(0.75, 1, 1, 6, 1, true).translate(0, 0.5, 0),
-      new THREE.MeshStandardMaterial({ roughness: 0.85, emissive: 0x2a1240, emissiveIntensity: 0.6 }),
-      f.maxSegments,
-    );
-    this.leaves = new Pool(
-      leafGeometry(),
-      new THREE.MeshStandardMaterial({ side: THREE.DoubleSide, roughness: 0.6, emissive: 0x145a44, emissiveIntensity: 0.9 }),
-      f.maxLeaves,
-    );
-    this.petals = new Pool(petalGeometry(), new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }), f.maxPetals);
-    this.cores = new Pool(new THREE.IcosahedronGeometry(1, 1), new THREE.MeshBasicMaterial(), f.maxCores);
-    for (const pool of [this.segments, this.leaves, this.petals, this.cores]) this.group.add(pool.mesh);
+    const shared: SharedUniforms = { uPlantState: this.states.uniform, uNearRadius: this.uNearRadius };
+    this.materials = {
+      bark: barkMaterial(shared, this.nearBand),
+      leaves: leafMaterial(shared, this.nearBand),
+      petals: petalMaterial(shared, this.nearBand),
+      cores: coreMaterial(shared, this.nearBand),
+      trunks: barkMaterial(shared, this.farBand),
+      limbs: barkMaterial(shared, this.midBand),
+      midClumps: clumpMaterial(shared, this.midBand),
+      farClumps: clumpMaterial(shared, this.beyondBand),
+      blossoms: blossomPointMaterial(shared, this.farBand, this.pixelScale),
+    };
+    this.shapes = {
+      nearBark: barkGeometry(false),
+      farBark: barkGeometry(true),
+      leaf: leafGeometry(),
+      petal: petalGeometry(),
+      core: coreGeometry(),
+      clump: clumpGeometry(),
+    };
+    const triangles = (g: THREE.BufferGeometry): number => (g.index ?? g.getAttribute('position')).count / 3;
+    this.partTriangles = {
+      bark: triangles(this.shapes.nearBark),
+      leaf: triangles(this.shapes.leaf),
+      petal: triangles(this.shapes.petal),
+      core: triangles(this.shapes.core),
+    };
   }
 
   /** Reports every plant grown enough for its ground to count as forest. */
   forEachGrown(minGrowth: number, visit: (x: number, z: number, radius: number) => void): void {
-    for (const p of this.plants) if (p.age >= p.plan.end * minGrowth) visit(p.x, p.z, p.plan.footprint);
+    for (const p of this.plants) if (p.age >= p.end * minGrowth) visit(p.x, p.z, p.footprint);
   }
 
   get plantCount(): number {
@@ -158,13 +198,39 @@ export class Forest {
    */
   land(x: number, z: number, strength: number): void {
     const sd = TUNING.seeding;
-    for (const p of this.plants) {
-      if ((p.x - x) ** 2 + (p.z - z) ** 2 < p.plan.footprint ** 2) {
-        p.boost = Math.min(sd.maxBoost, p.boost + sd.feedBoost * strength);
-        return;
-      }
+    const fed = this.plantAt(x, z);
+    if (fed) {
+      fed.boost = Math.min(sd.maxBoost, fed.boost + sd.feedBoost * strength);
+      return;
     }
     if (Math.random() < sd.chance * strength) this.seed(this.pickKind(), x, z);
+  }
+
+  update(dt: number): void {
+    if (!this.viewer) throw new Error('Forest needs a viewer camera before it can choose its level of detail');
+    this.grow(dt);
+    const eye = this.viewer.getWorldPosition(this.eye);
+    for (const chunk of this.near.values()) chunk.distance = chunk.roots.distanceToPoint(eye);
+    this.fitNearRadius(this.viewer, dt);
+    this.buildNear();
+    this.cull(eye);
+    this.states.flush();
+  }
+
+  /** The earliest-seeded plant whose footprint holds the point, as sparkles always fed. */
+  private plantAt(x: number, z: number): Plant | null {
+    const ci = Math.floor(x / LAND_CELL);
+    const cj = Math.floor(z / LAND_CELL);
+    const ring = Math.ceil(this.maxFootprint / LAND_CELL);
+    let hit: Plant | null = null;
+    for (let i = ci - ring; i <= ci + ring; i++) {
+      for (let j = cj - ring; j <= cj + ring; j++) {
+        for (const p of this.landCells.peek(i, j) ?? []) {
+          if ((p.x - x) ** 2 + (p.z - z) ** 2 < p.footprint ** 2 && (!hit || p.index < hit.index)) hit = p;
+        }
+      }
+    }
+    return hit;
   }
 
   private pickKind(): PlantKind {
@@ -176,103 +242,190 @@ export class Forest {
   }
 
   private seed(kind: PlantKind, x: number, z: number): void {
-    const plan = generatePlant(kind);
-    const petalCount = plan.blossoms.reduce((n, b) => n + b.petals, 0);
-    const fits = this.segments.fits(plan.segments.length) && this.leaves.fits(plan.leaves.length)
-      && this.petals.fits(petalCount) && this.cores.fits(plan.blossoms.length);
-    if (!fits) {
-      if (!this.warnedFull) console.warn(`Forest is full at ${this.plants.length} plants; no more seeding.`);
-      this.warnedFull = true;
-      return;
-    }
+    const index = this.plants.length;
+    this.states.reserve(index);
+    const seed = newSeed();
+    const plan = generatePlant(kind, seededRandom(seed));
+    const yaw = Math.random() * Math.PI * 2;
+    const { reach, height } = extent(plan);
+    const chunk = this.near.at(x, z);
     const plant: Plant = {
-      plan, x, z, petalCount,
-      transform: new THREE.Matrix4().compose(
-        new THREE.Vector3(x, 0, z),
-        new THREE.Quaternion().setFromAxisAngle(UP, Math.random() * Math.PI * 2),
-        new THREE.Vector3(1, 1, 1),
-      ),
+      index, seed, kind, x, z, yaw,
+      bark: new THREE.Color(BARK_COLORS[Math.floor(Math.random() * BARK_COLORS.length)]),
       age: 0,
       boost: 0,
-      segBase: this.segments.alloc(plan.segments.length),
-      leafBase: this.leaves.alloc(plan.leaves.length),
-      petalBase: this.petals.alloc(petalCount),
-      coreBase: this.cores.alloc(plan.blossoms.length),
+      end: plan.end,
+      footprint: plan.footprint,
+      bounds: new THREE.Sphere(new THREE.Vector3(x, height / 2, z), Math.hypot(reach, height / 2)),
+      cost: this.costOf(plan),
+      blossoms: this.blossomEvents(plan, x, z, yaw),
+      nextBlossom: 0,
     };
-    const bark = new THREE.Color(BARK_COLORS[Math.floor(Math.random() * BARK_COLORS.length)]);
-    plan.segments.forEach((_, i) => this.segments.setColor(plant.segBase + i, bark));
-    plan.leaves.forEach((l, i) => this.leaves.setColor(plant.leafBase + i, l.color));
     this.plants.push(plant);
     this.growing.push(plant);
+    this.states.setAge(index, 0);
+    this.states.setResident(index, false);
+
+    const min = new THREE.Vector3(x - reach, 0, z - reach);
+    const max = new THREE.Vector3(x + reach, height, z + reach);
+    for (const c of [this.mid.at(x, z), this.far.at(x, z)]) {
+      c.parts.write(plan, this.placement(plant));
+      c.parts.include(plant.bounds);
+      c.parts.flush();
+      c.box.expandByPoint(min).expandByPoint(max);
+    }
+
+    chunk.plants.push(plant);
+    chunk.cost += plant.cost;
+    chunk.roots.expandByPoint(this.v.set(x, 0, z));
+    chunk.box.expandByPoint(min).expandByPoint(max);
+    // Sown into detail that is already resident: write it now, since the plan is at hand.
+    if (chunk.parts && chunk.built === chunk.plants.length - 1) {
+      this.writeNear(chunk, plant, plan);
+      chunk.parts.flush();
+    }
+
+    this.landCells.at(x, z).push(plant);
+    this.maxFootprint = Math.max(this.maxFootprint, plant.footprint);
   }
 
-  update(dt: number): void {
+  private costOf(plan: PlantPlan): number {
+    const t = this.partTriangles;
+    const petals = plan.blossoms.reduce((n, b) => n + b.petals, 0);
+    return plan.segments.length * t.bark + plan.leaves.length * t.leaf + petals * t.petal + plan.blossoms.length * t.core;
+  }
+
+  /**
+   * Picks the largest near radius whose drawn full detail fits the triangle budget: a sparse
+   * meadow shows full detail far out, a dense forest keeps it close. Detail is drawn chunk by
+   * chunk, so it counts whole chunks in view, nearest first, as the renderer will draw them.
+   */
+  private fitNearRadius(viewer: THREE.Camera, dt: number): void {
+    const f = TUNING.forest;
+    const { min, max } = f.nearRadius;
+    this.frustum.setFromProjectionMatrix(this.viewProjection.multiplyMatrices(viewer.projectionMatrix, viewer.matrixWorldInverse));
+    const inView = [...this.near.values()]
+      .filter((c) => c.distance < max + CAMERA_STEP_SLACK && this.frustum.intersectsBox(c.box))
+      .sort((a, b) => a.distance - b.distance);
+    let target: number = max;
+    let total = 0;
+    for (const chunk of inView) {
+      total += chunk.cost;
+      if (total > f.nearBudget) {
+        // Leave this chunk out: chunks show only within the radius plus the slack.
+        target = Math.max(min, Math.min(max, chunk.distance - CAMERA_STEP_SLACK));
+        break;
+      }
+    }
+    this.nearRadius = Math.min(target, this.nearRadius + NEAR_RADIUS_GROWTH * dt);
+    this.uNearRadius.value = this.nearRadius;
+    this.nearBand.value.y = this.midBand.value.x = this.farBand.value.x = this.nearRadius;
+  }
+
+  private placement(p: Plant): Placement {
+    return { x: p.x, z: p.z, yaw: p.yaw, index: p.index, bark: p.bark };
+  }
+
+  /** The moments the plant's blossoms open, with where (world) and in which colour. */
+  private blossomEvents(plan: PlantPlan, x: number, z: number, yaw: number): Float32Array | null {
+    if (plan.blossoms.length === 0) return null;
+    const turn = new THREE.Quaternion().setFromAxisAngle(this.v.set(0, 1, 0), yaw);
+    const events = [...plan.blossoms].sort((a, b) => a.birth - b.birth);
+    const out = new Float32Array(events.length * BLOSSOM_RECORD);
+    events.forEach((b, i) => {
+      const at = b.at.clone().applyQuaternion(turn);
+      out.set([b.birth + TUNING.growth.budSwell, at.x + x, at.y, at.z + z, b.color.r, b.color.g, b.color.b], i * BLOSSOM_RECORD);
+    });
+    return out;
+  }
+
+  private grow(dt: number): void {
     const decay = Math.exp(-dt / TUNING.seeding.boostDecay);
     for (const p of this.growing) {
       p.boost *= decay;
-      const prevAge = p.age;
-      p.age = Math.min(p.age + dt * (1 + p.boost), p.plan.end);
-      this.write(p, prevAge);
+      p.age = Math.min(p.age + dt * (1 + p.boost), p.end);
+      this.states.setAge(p.index, p.age);
+      this.openBlossoms(p);
     }
-    this.growing = this.growing.filter((p) => p.age < p.plan.end);
+    this.growing = this.growing.filter((p) => p.age < p.end);
   }
 
-  private place(pool: Pool, i: number, p: Plant, at: THREE.Vector3, q: THREE.Quaternion, s: THREE.Vector3): void {
-    this.m.compose(at, q, s).premultiply(p.transform);
-    pool.setMatrix(i, this.m);
+  private openBlossoms(p: Plant): void {
+    const b = p.blossoms;
+    if (!b) return;
+    for (; p.nextBlossom < b.length && b[p.nextBlossom] <= p.age; p.nextBlossom += BLOSSOM_RECORD) {
+      const o = p.nextBlossom;
+      this.onBlossomOpen(this.v.set(b[o + 1], b[o + 2], b[o + 3]), this.color.setRGB(b[o + 4], b[o + 5], b[o + 6]));
+    }
+    if (p.nextBlossom >= b.length) p.blossoms = null;
   }
 
-  private write(p: Plant, prevAge: number): void {
-    const g = TUNING.growth;
-    const { plan, age } = p;
-    const thicken = 0.5 + 0.5 * clamp01(age / plan.end);
+  private writeNear(chunk: NearChunk, p: Plant, plan: PlantPlan): void {
+    if (!chunk.parts) throw new Error('Near detail written to a chunk that is not resident');
+    chunk.parts.write(plan, this.placement(p));
+    chunk.parts.include(p.bounds);
+    chunk.built++;
+    this.states.setResident(p.index, true);
+  }
 
-    plan.segments.forEach((seg, i) => {
-      const grown = clamp01((age - seg.birth) / seg.duration);
-      if (grown <= 0) return;
-      const r = seg.radius * thicken;
-      this.place(this.segments, p.segBase + i, p, seg.start, seg.quat, this.s.set(r, seg.length * grown, r));
-    });
-
-    plan.leaves.forEach((leaf, i) => {
-      const u = clamp01((age - leaf.birth) / g.leafUnfurl);
-      if (u <= 0) return;
-      spread(leaf.axis, BUD_ANGLE + (leaf.openAngle - BUD_ANGLE) * smooth(u), leaf.azimuth, this.dir);
-      this.q.setFromUnitVectors(UP, this.dir).multiply(this.q2.setFromAxisAngle(UP, leaf.azimuth));
-      const size = leaf.size * easeOutBack(u);
-      this.place(this.leaves, p.leafBase + i, p, leaf.at, this.q, this.s.setScalar(size));
-    });
-
-    let petal = p.petalBase;
-    plan.blossoms.forEach((b, i) => {
-      const t = age - b.birth;
-      const firstPetal = petal;
-      petal += b.petals;
-      if (t <= 0) return;
-      const swell = clamp01(t / g.budSwell);
-      const open = easeOutCubic(clamp01((t - g.budSwell) / g.blossomOpen));
-      const size = b.size * (BUD_SHARE * smooth(swell) + (1 - BUD_SHARE) * open);
-      const angle = BUD_ANGLE + (OPEN_ANGLE[plan.kind] - BUD_ANGLE) * open;
-      const glow = PETAL_GLOW.bud + (PETAL_GLOW.open - PETAL_GLOW.bud) * open;
-      for (let k = 0; k < b.petals; k++) {
-        const az = (k / b.petals) * Math.PI * 2;
-        spread(b.axis, angle, az, this.dir);
-        this.q.setFromUnitVectors(UP, this.dir).multiply(this.q2.setFromAxisAngle(UP, az));
-        this.place(this.petals, firstPetal + k, p, b.at, this.q, this.s.setScalar(size));
-        this.petals.setColor(firstPetal + k, b.color, glow);
+  /**
+   * Builds full detail for the chunks the camera is nearing, closest first, within a per-frame
+   * time budget, and frees it behind the camera. Until a plant's detail is written its far
+   * version stands in, so a slow build is never a hole.
+   */
+  private buildNear(): void {
+    const f = TUNING.forest;
+    const want = this.nearRadius + f.prefetch;
+    const drop = want + f.evictMargin;
+    const queue: NearChunk[] = [];
+    for (const chunk of this.near.values()) {
+      if (chunk.parts && chunk.distance > drop) this.evict(chunk);
+      else if (chunk.distance < want && chunk.built < chunk.plants.length) queue.push(chunk);
+    }
+    queue.sort((a, b) => a.distance - b.distance);
+    const start = performance.now();
+    let wrote = false;
+    for (const chunk of queue) {
+      if (!chunk.parts) {
+        chunk.parts = new NearParts(this.materials, this.shapes);
+        chunk.parts.addTo(this.group);
       }
-      if (open > 0) {
-        this.place(this.cores, p.coreBase + i, p, b.at, this.q.identity(), this.s.setScalar(b.size * CORE_SHARE * open));
-        this.cores.setColor(p.coreBase + i, this.color.copy(b.color).lerp(this.white, 0.6), CORE_GLOW);
+      // At least one plant per frame, so detail always arrives however slow the device.
+      while (chunk.built < chunk.plants.length && (!wrote || performance.now() - start < f.buildBudgetMs)) {
+        const p = chunk.plants[chunk.built];
+        this.writeNear(chunk, p, generatePlant(p.kind, seededRandom(p.seed)));
+        wrote = true;
       }
-      if (prevAge - b.birth < g.budSwell && t >= g.budSwell) {
-        this.onBlossomOpen(this.v.copy(b.at).applyMatrix4(p.transform), b.color);
-      }
-    });
+      chunk.parts.flush();
+      if (chunk.built < chunk.plants.length) return;
+    }
+  }
 
-    this.segments.markDirty(p.segBase, plan.segments.length);
-    this.leaves.markDirty(p.leafBase, plan.leaves.length);
-    this.petals.markDirty(p.petalBase, p.petalCount);
-    this.cores.markDirty(p.coreBase, plan.blossoms.length);
+  private evict(chunk: NearChunk): void {
+    chunk.parts?.dispose();
+    chunk.parts = null;
+    for (let i = 0; i < chunk.built; i++) this.states.setResident(chunk.plants[i].index, false);
+    chunk.built = 0;
+  }
+
+  /** Hides chunks whose plants are all outside the distance bands of what they draw. */
+  private cull(eye: THREE.Vector3): void {
+    const f = TUNING.forest;
+    for (const chunk of this.near.values()) {
+      chunk.parts?.show(chunk.distance < this.nearRadius + CAMERA_STEP_SLACK);
+    }
+    for (const chunk of this.mid.values()) chunk.parts.show(chunk.box.distanceToPoint(eye) < f.midRadius + CAMERA_STEP_SLACK);
+    for (const chunk of this.far.values()) chunk.parts.showUpTo(farthest(chunk.box, eye) + CAMERA_STEP_SLACK, f.midRadius);
+  }
+
+  private newChunk<T extends MidParts | FarParts>(parts: T): Chunk<T> {
+    parts.addTo(this.group);
+    return new Chunk(parts);
+  }
+
+  /** Blossom points are sized in pixels of whatever target the scene is being drawn into. */
+  private updatePixelScale(renderer: THREE.WebGLRenderer): void {
+    const target = renderer.getRenderTarget();
+    this.pixelScale.value = (target ? target.height : renderer.getDrawingBufferSize(this.drawingBuffer).y) / 2;
   }
 }
