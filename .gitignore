@@ -37,3 +37,6 @@ service-account*.json
 
 # Spec Kit local state
 .specify/feature.json
+
+# Claude Code agent worktrees
+.claude/worktrees/
