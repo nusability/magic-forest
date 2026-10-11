@@ -1,18 +1,17 @@
 import * as THREE from 'three';
 import { TUNING } from './tuning';
 
-// Multiplier crystals hang in the air over the meadow and out over the barren land. Each one
-// stands under a soft beam of light, which is how you spot it from across the long view. Fly
+// Crystals hang in the air over the meadow. Each one stands under a soft beam of light, which is
+// how you spot it from across the long view. Fly
 // through one and its effect lasts the rest of the level, stacking with any others. New crystals
-// keep appearing, so there's always a detour on offer, and it always costs you time spent defending.
+// keep appearing, often out over open meadow where the wisps roam, so each one is a small risk.
 
-export type CrystalKind = 'flow' | 'bloom' | 'wings' | 'swift';
-export const CRYSTAL_KINDS: CrystalKind[] = ['flow', 'bloom', 'wings', 'swift'];
+export type CrystalKind = 'swift' | 'calm' | 'time';
+export const CRYSTAL_KINDS: CrystalKind[] = ['swift', 'calm', 'time'];
 export const CRYSTAL_COLORS: Record<CrystalKind, number> = {
-  flow: 0xffd56e, // more sparkles
-  bloom: 0xff6ec7, // stronger sparkles
-  wings: 0x6ef5ff, // wider spray
   swift: 0xeef4ff, // faster flight
+  calm: 0x6ef5ff, // slower wisps
+  time: 0xffd56e, // a later dawn
 };
 
 const GLOW = 1.5; // above the bloom threshold, so crystals glow

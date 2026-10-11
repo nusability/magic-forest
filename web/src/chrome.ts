@@ -6,10 +6,10 @@ import { TUNING } from './tuning';
 
 // The game's chrome, drawn in the world rather than over it. Icons only, no text, and every part
 // fades back when it has nothing new to say.
-//  - A round minimap, turned so that ahead of the bird is up: the meadow, the blight (violet),
-//    the forest (teal), the crystals (dots in their colours) and the bird (an arrow).
+//  - A round minimap, turned so that ahead of the bird is up: the meadow, the forest (teal),
+//    the open trail (bright), the wisps and crystals (dots in their colours) and the bird.
 //  - Around it, a wreath that blossoms bud by bud as the forest grows; the last blossom wins.
-//  - As the blight nears its limit, the map's rim pulses violet.
+//  - As dawn nears, the map's rim warms and pulses.
 //  - Every crystal held is a mote of its colour circling the bird.
 //  - When the level ends, a replay glyph appears; a tap starts again.
 
@@ -22,11 +22,10 @@ const MAP = {
   disc: 0.78, // the map's radius inside the quad; the wreath sits outside it
 };
 const WREATH_BLOSSOMS = 12;
-const MAX_CRYSTAL_DOTS = 8; // must match the shader's array size
+const MAX_DOTS = 12; // crystals and wisps; must match the shader's array size
 const REST_OPACITY = 0.6;
 const FLASH_SECONDS = 2.5;
-const BLIGHT_FLASH_STEP = 0.03; // of the blight limit; a jump this big brings the map forward
-const DANGER = 0.75; // of the blight limit; past it the rim pulses and the map stays forward
+
 
 const MOTE = { radius: 0.07, orbit: 1.5, speed: 1.6, bob: 0.25, glow: 1.6, max: 24 };
 
@@ -39,7 +38,7 @@ const mapFragment = /* glsl */ `
   ${NOISE_GLSL}
   ${FERTILE_GLSL}
   ${FIELD_GLSL}
-  #define DOTS ${MAX_CRYSTAL_DOTS}
+  #define DOTS ${MAX_DOTS}
   #define BLOSSOMS ${WREATH_BLOSSOMS}.0
   uniform float uWorldRadius, uDisc, uHeading, uProgress, uDanger, uOpacity, uTime, uWon;
   uniform vec2 uBird;
@@ -67,8 +66,11 @@ const mapFragment = /* glsl */ `
       vec2 f = field(xz);
       float meadow = fertile(xz);
       vec3 c = mix(vec3(0.05, 0.04, 0.07), vec3(0.09, 0.2, 0.12), meadow);
+      vec2 uvField = xz / uFieldSize + 0.5;
+      float trail = texture2D(uField, uvField).b;
       c = mix(c, vec3(0.15, 0.85, 0.65), f.g * meadow);
-      c = mix(c, vec3(0.42, 0.1, 0.66), smoothstep(0.3, 0.6, f.r));
+      c = mix(c, vec3(0.42, 0.1, 0.66), f.r);
+      c = mix(c, vec3(1.0, 0.95, 0.75), smoothstep(0.2, 0.6, trail));
       float edge = smoothstep(uDisc - 0.03, uDisc, r);
       col = vec4(c, 0.78 * (1.0 - edge));
 
@@ -87,7 +89,7 @@ const mapFragment = /* glsl */ `
 
     // The rim, which pulses violet as the blight nears its limit.
     float rim = smoothstep(0.012, 0.0, abs(r - uDisc));
-    vec3 rimColor = mix(vec3(0.8, 0.85, 1.0), vec3(0.75, 0.3, 1.0), uDanger);
+    vec3 rimColor = mix(vec3(0.8, 0.85, 1.0), vec3(1.0, 0.6, 0.35), uDanger);
     float rimGlow = rim * (0.35 + uDanger * (0.8 + 0.6 * sin(uTime * 6.0)));
     col.rgb += rimColor * rimGlow;
     col.a = max(col.a, rimGlow);
@@ -132,13 +134,12 @@ export class Chrome {
   private readonly replayMaterial = new THREE.MeshBasicMaterial({ transparent: true, depthTest: false, depthWrite: false });
   private readonly motes: THREE.InstancedMesh;
   private readonly moteKinds: CrystalKind[] = [];
-  private readonly dots = Array.from({ length: MAX_CRYSTAL_DOTS }, () => new THREE.Vector3());
-  private readonly dotColors = Array.from({ length: MAX_CRYSTAL_DOTS }, () => new THREE.Color());
+  private readonly dots = Array.from({ length: MAX_DOTS }, () => new THREE.Vector3());
+  private readonly dotColors = Array.from({ length: MAX_DOTS }, () => new THREE.Color());
 
   private blossoms = 0;
-  private crystalCount = 0;
+  private dotCount = 0;
   private flash = 0;
-  private lastFlashBlight = 0;
   private time = 0;
   private readonly m = new THREE.Matrix4();
 
@@ -151,7 +152,7 @@ export class Chrome {
       depthWrite: false,
       uniforms: {
         uField: { value: field },
-        uFieldSize: { value: TUNING.blight.fieldSize },
+        uFieldSize: { value: TUNING.territory.fieldSize },
         uFertileRadius: { value: TUNING.level.fertileRadius },
         uEdgeNoise: { value: TUNING.level.edgeNoise },
         uWorldRadius: { value: MAP.worldRadius },
@@ -207,39 +208,30 @@ export class Chrome {
   }
 
   /**
-   * forest and blight are shares of the meadow; target and loseAt are the level's limits.
-   * crystals lists what's waiting to be collected.
+   * progress runs to 1 at the level's goal; danger rises to 1 as time runs out. dots lists the
+   * things to mark on the map (crystals and wisps) with their colours.
    */
   update(
-    dt: number, bird: THREE.Vector3, heading: number,
-    forest: number, target: number, blight: number, loseAt: number, status: Status,
-    crystals: (visit: (kind: CrystalKind, at: THREE.Vector3) => void) => void,
+    dt: number, bird: THREE.Vector3, heading: number, progress: number, danger: number, status: Status,
+    dots: (visit: (color: number, at: THREE.Vector3) => void) => void,
   ): void {
     this.time += dt;
     const u = this.map.uniforms;
     const won = status === 'won';
-    const progress = won ? 1 : Math.min(forest / target, 1);
     const blossoms = Math.floor(progress * WREATH_BLOSSOMS + 1e-6);
     if (blossoms > this.blossoms) this.flash = FLASH_SECONDS;
     this.blossoms = blossoms;
 
-    const cover = status === 'lost' ? 1 : Math.min(blight / loseAt, 1);
-    if (cover - this.lastFlashBlight >= BLIGHT_FLASH_STEP) {
-      this.lastFlashBlight = cover;
-      this.flash = FLASH_SECONDS;
-    }
-    const danger = THREE.MathUtils.clamp((cover - DANGER) / (1 - DANGER), 0, 1);
-
     let count = 0;
-    crystals((kind, at) => {
-      if (count >= MAX_CRYSTAL_DOTS) return;
+    dots((color, at) => {
+      if (count >= MAX_DOTS) return;
       this.dots[count].set(at.x, at.z, 1);
-      this.dotColors[count].set(CRYSTAL_COLORS[kind]);
+      this.dotColors[count].set(color);
       count++;
     });
-    for (let i = count; i < MAX_CRYSTAL_DOTS; i++) this.dots[i].z = 0;
-    if (count > this.crystalCount) this.flash = FLASH_SECONDS; // a new crystal appeared
-    this.crystalCount = count;
+    for (let i = count; i < MAX_DOTS; i++) this.dots[i].z = 0;
+    if (count > this.dotCount) this.flash = FLASH_SECONDS; // something new appeared
+    this.dotCount = count;
 
     this.flash = Math.max(0, this.flash - dt);
     const forward = won || danger > 0 || status === 'lost';

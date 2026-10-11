@@ -14,6 +14,7 @@ const SKY_COLORS = {
   moon: new THREE.Color(0xfff2d6),
 };
 const DOME_RADIUS = 4500;
+const SUN_DIRECTION = new THREE.Vector3(1, 0, 0.3).normalize(); // where dawn breaks, on the horizon
 
 const skyVertex = /* glsl */ `
   varying vec3 vDir;
@@ -26,8 +27,8 @@ const skyVertex = /* glsl */ `
 
 const skyFragment = /* glsl */ `
   ${NOISE_GLSL}
-  uniform vec3 uZenith, uHorizon, uGlow, uMoonColor, uMoonDir;
-  uniform float uTime;
+  uniform vec3 uZenith, uHorizon, uGlow, uMoonColor, uMoonDir, uSunDir;
+  uniform float uTime, uDawn;
   varying vec3 vDir;
 
   float hash13(vec3 p) {
@@ -68,7 +69,13 @@ const skyFragment = /* glsl */ `
     float s = stars(dir, 160.0, 0.11, 0.09) * 1.2
             + stars(dir, 90.0, 0.06, 0.08) * 1.8
             + stars(dir, 300.0, 0.10 + band * 0.25, 0.12) * 0.8;
-    col += vec3(0.95, 0.95, 1.0) * s * horizonFade;
+    col += vec3(0.95, 0.95, 1.0) * s * horizonFade * (1.0 - uDawn);
+
+    // Dawn: the sky blues and warms from the east, the stars and Milky Way wash out.
+    float east = max(dot(normalize(vec3(dir.x, 0.0, dir.z)), uSunDir), 0.0);
+    vec3 dawnSky = mix(vec3(0.12, 0.16, 0.36), vec3(0.95, 0.45, 0.35), exp(-max(dir.y, 0.0) * 5.0) * (0.35 + 0.65 * east));
+    col = mix(col, dawnSky, uDawn * 0.85);
+    col += vec3(1.0, 0.6, 0.3) * uDawn * uDawn * exp(-abs(dir.y) * 18.0) * east;
 
     float m = dot(dir, uMoonDir);
     col += uMoonColor * smoothstep(0.9993, 0.9996, m) * 1.6; // the disc, bright enough to bloom
@@ -154,6 +161,8 @@ export class Sky {
         uMoonColor: { value: SKY_COLORS.moon },
         uMoonDir: { value: MOON_DIRECTION },
         uTime: { value: 0 },
+        uDawn: { value: 0 },
+        uSunDir: { value: SUN_DIRECTION },
       },
     });
     this.dome = new THREE.Mesh(new THREE.SphereGeometry(DOME_RADIUS, 48, 24), this.material);
@@ -169,6 +178,11 @@ export class Sky {
       }),
     );
     this.group.add(this.dome, hills);
+  }
+
+  /** 0 is deep night, 1 is sunrise. */
+  setDawn(dawn: number): void {
+    this.material.uniforms.uDawn.value = dawn;
   }
 
   update(dt: number, cameraPosition: THREE.Vector3): void {

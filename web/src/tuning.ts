@@ -3,7 +3,7 @@
 export const TUNING = {
   flight: {
     speed: 8, // world units per second, before swift crystals
-    startHeight: 4.5,
+    startHeight: 10, // high enough to see the loop you're drawing
     minHeight: 2.5,
     maxHeight: 35, // high enough to look out over the whole meadow
     climbRate: 9, // world units per second at a full vertical drag; letting go holds altitude
@@ -14,17 +14,22 @@ export const TUNING = {
     flapAmplitude: 0.6, // radians
   },
   camera: {
-    behind: 5.5,
-    above: 2.4,
-    lookAhead: 4,
-    lookBelow: 0.6,
+    // At the start height the camera looks down onto the meadow at about 45°, so the trail and
+    // the loop being closed stay in view around the bird.
+    behind: 6,
+    above: 6,
+    lookAhead: 3,
+    lookBelow: 4,
     follow: 5, // 1/s
-    // Per unit of altitude above the start height: the camera backs off and looks further
-    // down, so climbing becomes an overview of the meadow.
+    // Per unit of altitude above the start height: the camera backs off and its gaze flattens
+    // towards the horizon, so climbing becomes an overview of the meadow.
     behindPerHeight: 0.12,
     abovePerHeight: 0.1,
-    lookAheadPerHeight: 0.5,
-    lookBelowPerHeight: 0.25,
+    lookAheadPerHeight: 1.0,
+    lookBelowPerHeight: 0.3,
+    // The gaze swings into a turn by this many world units per radian/second of turning,
+    // towards where the loop you're closing lies.
+    lookIntoTurn: 2.5,
   },
   sparkles: {
     perSecond: 30, // at the start; flow crystals raise it
@@ -40,7 +45,7 @@ export const TUNING = {
     groundGlow: 0.7, // seconds a landed sparkle glows on the ground
     // Sparkles weaken as they fall: full strength for this drop, gone by the second. Flying
     // high gives a view but sows nothing.
-    fadeDrop: [6, 14],
+    fadeDrop: [12, 20],
   },
   seeding: {
     chance: 0.35, // chance a sparkle landing on open ground seeds a plant
@@ -80,31 +85,44 @@ export const TUNING = {
   level: {
     fertileRadius: 60, // the meadow the magic can take root in; beyond it lies barren land
     edgeNoise: 5, // how ragged the meadow's edge is, in world units
-    target: 0.22, // share of the meadow that must be forest to win
-    loseAt: 0.6, // share of the meadow the blight must take to lose
+    target: 0.65, // share of the meadow that must be forest before dawn
+    startGrove: 7, // radius of the forest you start in, at the meadow's centre
+  },
+  night: {
+    duration: 180, // seconds until dawn, when the magic fades
+    dawnFrom: 0.55, // share of the night after which the sky starts to brighten
+  },
+  territory: {
+    fieldSize: 160, // world units the grid covers, centred on the meadow
+    cells: 128,
+    drawHeight: 14, // the bird draws its trail only below this altitude
+    selfCloseSteps: 12, // trail cells before crossing your own trail closes a loop
+    waveDelay: 0.05, // seconds per cell of distance from the trail, for the bloom wave
+    plantDensity: 0.4, // chance per newly claimed cell that a plant starts there
+    shatterPenalty: 8, // seconds of night lost when a wisp breaks your trail
+  },
+  wisps: {
+    count: 3,
+    addEvery: 50, // seconds; another wisp joins, up to max
+    max: 6,
+    speed: 5.5,
+    hover: 1.8,
+    minSpawnDistance: 25, // from the bird
+    heat: 0.45, // the faint scorch a wisp leaves on the ground (and the minimap)
+    heatDecay: 1.5, // seconds (time constant)
   },
   multipliers: {
     pickupRadius: 2.2,
-    flow: 1.4, // sparkles per second
-    bloom: 1.4, // seeding and feeding strength of each sparkle
-    wings: 1.4, // sparkle spread
     swift: 1.15, // flight speed
+    calm: 0.8, // wisp speed
+    time: 20, // seconds added to the night
   },
   crystals: {
-    initial: 6,
-    max: 6, // live at once
-    spawnEvery: 14, // seconds between new crystals while below max
-    ring: [15, 85], // distance from the meadow's centre; the far ones sit out over barren land
-    heights: [3, 6.5],
-  },
-  blight: {
-    fieldSize: 160, // world units the blight grid covers, centred on the meadow
-    cells: 128,
-    tick: 0.2, // seconds between spread steps
-    spreadRate: 0.3, // blight gained per second by a cell with a blighted neighbour
-    startRadius: 9,
-    cleansePerSparkle: 0.12,
-    coverAt: 0.35, // growth a plant needs before its ground counts as forest
+    initial: 4,
+    max: 4, // live at once
+    spawnEvery: 18, // seconds between new crystals while below max
+    ring: [12, 55], // distance from the meadow's centre
+    heights: [2.5, 6],
   },
   bloom: { strength: 0.7, radius: 0.4, threshold: 0.75 },
 } as const;

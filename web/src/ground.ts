@@ -112,7 +112,7 @@ const groundFragment = /* glsl */ `
     col *= uLight;
     float front = clamp(1.0 - abs(f.r - 0.5) * 4.0, 0.0, 1.0);
     col += uBlightFront * front * (0.25 + 0.15 * sin(uTime * 2.0 + veins * 6.0));
-    col += uForestGlow * f.g * 0.12 * (0.6 + 0.8 * fbm(xz * 0.6 - uTime * 0.08));
+    col += uForestGlow * f.g * 0.035 * (0.4 + 1.2 * fbm(xz * 0.6 - uTime * 0.08));
     gl_FragColor = vec4(col, 1.0);
     #include <colorspace_fragment>
   }
@@ -182,7 +182,7 @@ export class Ground {
       uFertileRadius: { value: TUNING.level.fertileRadius },
       uEdgeNoise: { value: TUNING.level.edgeNoise },
       uField: { value: field },
-      uFieldSize: { value: TUNING.blight.fieldSize },
+      uFieldSize: { value: TUNING.territory.fieldSize },
       uTime: { value: 0 },
     };
 
