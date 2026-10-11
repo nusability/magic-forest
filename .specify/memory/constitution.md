@@ -1,4 +1,4 @@
-# {{GAME_NAME}} Constitution
+# Magic Forest Constitution
 
 The project's durable values. Everything in the repo complies with it: the spec, the code,
 the Stori backlog, `AGENTS.md` and `conventions.md`. If they conflict, this document wins.
@@ -56,9 +56,9 @@ either platform.
      the test that tells you whether a change serves it. When a call is ambiguous, pick the
      option that advances them. -->
 
-- **N1. {{NORTH_STAR_1}}**
-- **N2. {{NORTH_STAR_2}}**
-- **N3. {{NORTH_STAR_3}}**
+- **N1. Growth is the reward.** Every sparkle that lands visibly grows something: a branch, a leaf, a blossom. *Test*: muted and with no UI, does watching the forest grow still feel good?
+- **N2. Every detour is a real choice.** Chasing an amplifier and sowing the ground are both sometimes right. *Test*: does the best line through a level change with the pickups on offer, or is one answer always correct?
+- **N3. Calm flow, one thumb.** Steering feels effortless and there is no punishing failure, only a more or less lush forest. *Test*: can it be played one-handed on a phone without frustration?
 
 ---
 

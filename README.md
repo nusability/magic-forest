@@ -1,21 +1,17 @@
-# game-template
+# Magic Forest
 
-A starting point for **mobile games**: prototyped on the web, then built as **native iOS and
-Android apps in parallel**. Spec-driven with [Spec Kit](https://github.com/github/spec-kit)
-in **single-spec mode**, with work tracked on **Stori**.
+A mobile game for the App Store and Google Play. A magic, colorful bird, seen from behind,
+flies through the air trailing sparkles. Wherever they land, a magic forest grows branch by
+branch, leaf by leaf, into glowing blossoms. Each level asks you to grow the forest to a target
+size, and you keep choosing whether to detour for amplifiers and multipliers.
 
-## Using this template
+- **Stage**: prototype (`web/`, three.js + TypeScript + Vite, see ADR 0003)
+- **Play it**: GitHub Pages, built from `web/` on every push to `main`
+- **Run it locally**: `cd web && npm ci && npm run dev`
+- **Spec**: [`specs/spec.md`](specs/spec.md) · **Rules**: [`AGENTS.md`](AGENTS.md) · **Work**: Stori `MFOR`
 
-1. On GitHub, **Use this template** → create the game's repo. Clone it and open Claude Code.
-2. Run **`/new-game "Game Name" KEY`**. It creates the Stori project (Now / Next / Later), fills
-   the placeholders, seeds a light spec, records the web stack as ADR 0003, and scaffolds `web/`.
-3. **Sketch in `web/`**, play it on your phone, and capture ideas on Stori. Keep the spec's
-   Vision, Core Loop and Tuned Numbers honest. Plenty of games end here.
-4. When it's fun and you want it in the stores, run **`/graduate`**. It harvests the full spec
-   from the prototype, flips `Stage:` to `pre-prod`, takes the apps' one-way doors as ADRs, and
-   files the riskiest first work on Stori.
-5. From then on, every change goes through the loop in [`AGENTS.md`](AGENTS.md) on both
-   platforms at once.
+Built from `game-template`: sketch in `web/` until it's fun, then `/graduate` to build the
+native apps.
 
 ## How it differs from stock Spec Kit
 

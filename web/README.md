@@ -1,6 +1,6 @@
 # web/: the prototype
 
-Where we find the game (ADR 0002). Its stack is ADR 0003, taken by `/new-game`.
+Where we find the game (ADR 0002). Its stack is ADR 0003: three.js + TypeScript + Vite. `npm ci && npm run dev` runs it.
 
 - **Stage `prototype`**: this *is* the game. Sketch fast, play it on a phone, and keep the
   spec's Vision, Core Loop and Tuned Numbers honest as you go.
