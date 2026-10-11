@@ -1,40 +1,25 @@
+import type { CrystalKind } from './crystals';
 import { TUNING } from './tuning';
-import type { MultiplierKind } from './pickups';
 
-// The level's rules: magic is gathered from orbs and spent sowing over the meadow; multipliers
-// last the whole level and stack; the level is won when enough of the meadow is forest and lost
-// when the blight has taken too much of it.
+// The level's rules: the bird always sows; crystals it collects last the whole level and stack;
+// the level is won when enough of the meadow is forest and lost when the blight has taken too
+// much of it.
 
 export type Status = 'playing' | 'won' | 'lost';
 
 export class Game {
   status: Status = 'playing';
-  magic: number = TUNING.magic.start;
-  readonly collected: Record<MultiplierKind, number> = { bloom: 0, wings: 0, thrift: 0, well: 0 };
+  readonly collected: Record<CrystalKind, number> = { flow: 0, bloom: 0, wings: 0, swift: 0 };
 
-  private factor(kind: MultiplierKind): number {
+  factor(kind: CrystalKind): number {
     return TUNING.multipliers[kind] ** this.collected[kind];
   }
 
-  /** Seeding and feeding strength of each sparkle. */
-  get bloom(): number { return this.factor('bloom'); }
-  /** How widely sparkles spread. */
-  get spread(): number { return this.factor('wings'); }
-  get capacity(): number { return TUNING.magic.capacity * this.factor('well'); }
-  get drainPerSecond(): number { return TUNING.magic.drainPerSecond * this.factor('thrift'); }
-
-  /** Spends the magic for dt seconds of sowing. Returns false when there was none. */
-  sow(dt: number): boolean {
-    if (this.status !== 'playing' || this.magic <= 0) return false;
-    this.magic = Math.max(0, this.magic - this.drainPerSecond * dt);
-    return true;
+  get totalCollected(): number {
+    return Object.values(this.collected).reduce((a, b) => a + b, 0);
   }
 
-  gather(amount: number): void {
-    this.magic = Math.min(this.capacity, this.magic + amount);
-  }
-
-  collect(kind: MultiplierKind): void {
+  collect(kind: CrystalKind): void {
     this.collected[kind]++;
   }
 

@@ -5,25 +5,27 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Bird } from './bird';
 import { Blight } from './blight';
+import { Chrome } from './chrome';
+import { CRYSTAL_COLORS, Crystals } from './crystals';
 import { isFertile } from './fertile';
 import { Forest } from './forest';
 import { Game } from './game';
 import { Ground } from './ground';
-import { Hud } from './hud';
-import { Pickups, generateLayout } from './pickups';
 import { MOON_DIRECTION, Sky } from './sky';
 import { Sparkles } from './sparkles';
+import { Stats } from './stats';
 import { SPARKLE_COLORS, TUNING } from './tuning';
 
-// One level. The bird gathers magic from orb clusters out on the barren land and pours it out as
-// sparkles while over the meadow. Where they land the forest grows, and grown forest holds back
-// a blight creeping across the meadow. Multiplier crystals make every trip count for more.
-// Drag sideways to turn and up or down to climb or dive; let go to fly straight.
+// One level. The bird always sows sparkles. Where they land on the meadow the forest grows, and
+// grown forest holds back a blight creeping across it. Crystals make the bird sow more, stronger,
+// wider or faster for the rest of the level. Drag sideways to turn and up or down to climb or
+// dive; let go to fly straight. When the level ends, tap to play again.
 
 const FOV = 60;
 const DRAG_FULL_SCALE = { x: 0.35, y: 0.3 }; // share of the screen a drag must cover for full steer
 const BURST_SPEED = { up: 1.6, scatter: 1.2 };
 const MOON_DISTANCE = 100; // only the direction matters for a directional light
+const REPLAY_DELAY_S = 1.5; // so a tap still in progress at the end doesn't restart at once
 // Frames longer than this (a backgrounded tab) are clamped so nothing teleports.
 const MAX_FRAME_SECONDS = 0.1;
 
@@ -35,6 +37,7 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(FOV, window.innerWidth / window.innerHeight, 0.1, TUNING.view.far);
+scene.add(camera); // the chrome overlay rides on it
 
 scene.add(new THREE.HemisphereLight(0x8a7bff, 0x1e3b2a, 1.2));
 const moon = new THREE.DirectionalLight(0xffe9c4, 1.4);
@@ -51,7 +54,11 @@ scene.add(ground.group);
 const groundCenter = new THREE.Vector3();
 
 const game = new Game();
-const hud = new Hud();
+const chrome = new Chrome();
+camera.add(chrome.overlay);
+scene.add(chrome.world);
+chrome.layout(camera);
+const stats = new Stats();
 
 const bird = new Bird();
 scene.add(bird.root);
@@ -76,14 +83,13 @@ scene.add(forest.group);
 
 const sparkles = new Sparkles((x, z) => {
   if (blight.isBlighted(x, z)) blight.cleanse(x, z, TUNING.blight.cleansePerSparkle);
-  else if (isFertile(x, z)) forest.land(x, z, game.bloom);
+  else if (isFertile(x, z)) forest.land(x, z, game.factor('bloom'));
 });
 sparkles.setViewport(renderer.domElement.height, FOV);
 scene.add(sparkles.points);
 
-const pickups = new Pickups(generateLayout(blightAngle));
-scene.add(pickups.group);
-const orbColor = new THREE.Color(0xffe9a8);
+const crystals = new Crystals();
+scene.add(crystals.group);
 
 const emitPoint = new THREE.Vector3();
 const emitVelocity = new THREE.Vector3();
@@ -91,7 +97,7 @@ function emitFromBird(): void {
   const s = TUNING.sparkles;
   bird.randomSurfacePoint(emitPoint);
   emitVelocity.copy(bird.velocity).multiplyScalar(s.carry);
-  emitVelocity.addScaledVector(new THREE.Vector3().randomDirection(), s.scatter * game.spread * Math.random());
+  emitVelocity.addScaledVector(new THREE.Vector3().randomDirection(), s.scatter * game.factor('wings') * Math.random());
   sparkles.emit({
     position: emitPoint,
     velocity: emitVelocity,
@@ -104,7 +110,9 @@ function emitFromBird(): void {
 // Steering is the finger's offset from where it touched down; letting go flies straight.
 const steer = new THREE.Vector2();
 let dragStart: THREE.Vector2 | null = null;
+let endedFor = 0;
 renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (game.status !== 'playing' && endedFor >= REPLAY_DELAY_S) location.reload();
   dragStart = new THREE.Vector2(e.clientX, e.clientY);
 });
 renderer.domElement.addEventListener('pointermove', (e) => {
@@ -133,6 +141,7 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
   sparkles.setViewport(renderer.domElement.height, FOV);
+  chrome.layout(camera);
 });
 
 const forward = new THREE.Vector3();
@@ -160,36 +169,29 @@ renderer.setAnimationLoop((timestamp) => {
   if (dt <= 0) return;
   renderer.info.reset();
 
+  bird.speedFactor = game.factor('swift');
   bird.update(dt, steer);
   const p = bird.root.position;
-  const overMeadow = isFertile(p.x, p.z);
-  const sowing = overMeadow && game.sow(dt);
-  if (sowing) {
-    emitDebt += TUNING.sparkles.perSecond * dt;
-    for (; emitDebt >= 1; emitDebt--) emitFromBird();
-  }
-  pickups.update(
-    dt, p,
-    (at) => {
-      game.gather(TUNING.orbs.value);
-      burst(at, orbColor, TUNING.growth.blossomBurst);
-    },
-    (kind, at) => {
-      game.collect(kind);
-      hud.multiplierToast(kind);
-      burst(at, orbColor, TUNING.growth.blossomBurst * 3);
-    },
-  );
+  emitDebt += TUNING.sparkles.perSecond * game.factor('flow') * dt;
+  for (; emitDebt >= 1; emitDebt--) emitFromBird();
+  crystals.update(dt, p, (kind, at) => {
+    game.collect(kind);
+    chrome.addMote(kind);
+    burst(at, new THREE.Color(CRYSTAL_COLORS[kind]), TUNING.growth.blossomBurst * 3);
+  });
   sparkles.update(dt);
   forest.update(dt);
   if (game.status === 'playing') {
     blight.update(dt, (cover) => forest.forEachGrown(TUNING.blight.coverAt, cover));
     game.judge(blight.forestShare, blight.blightShare);
+  } else {
+    endedFor += dt;
   }
   updateCamera(dt, false);
   sky.update(dt, camera.position);
   ground.update(dt, groundCenter.copy(camera.position).addScaledVector(forward, TUNING.ground.lookAhead));
-  hud.update(game, blight.forestShare, blight.blightShare, sowing, overMeadow);
+  const l = TUNING.level;
+  chrome.update(dt, p, blight.forestShare, l.target, blight.blightShare, l.loseAt, game.status);
   composer.render();
-  hud.frame(dt, { renderer, plants: forest.plantCount, sparkles: sparkles.liveCount });
+  stats.frame(dt, { renderer, plants: forest.plantCount, sparkles: sparkles.liveCount });
 });

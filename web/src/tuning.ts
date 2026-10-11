@@ -2,10 +2,10 @@
 // yet; the ones that survive play go into the spec's Tuned Numbers.
 export const TUNING = {
   flight: {
-    speed: 4.5, // world units per second
+    speed: 8, // world units per second, before swift crystals
     baseHeight: 4.5,
     heightRange: 2, // a full vertical drag moves the target altitude by this much
-    maxYawRate: 1.3, // radians per second at a full sideways drag
+    maxYawRate: 1.7, // radians per second at a full sideways drag
     steerEase: 3, // how quickly yaw rate and altitude follow the finger (1/s)
     bankPerYawRate: 0.45, // radians of roll per radian/s of turning
     flapHz: 2.2,
@@ -16,10 +16,10 @@ export const TUNING = {
     above: 2.4,
     lookAhead: 4,
     lookBelow: 0.6,
-    follow: 4, // 1/s
+    follow: 5, // 1/s
   },
   sparkles: {
-    perSecond: 90,
+    perSecond: 30, // at the start; flow crystals raise it
     starShare: 0.18, // share of emitted sparkles that are big twinkling stars
     max: 2000,
     carry: 0.85, // share of the bird's velocity a sparkle keeps when it leaves the bird
@@ -72,27 +72,19 @@ export const TUNING = {
     target: 0.22, // share of the meadow that must be forest to win
     loseAt: 0.6, // share of the meadow the blight must take to lose
   },
-  magic: {
-    capacity: 100,
-    start: 100,
-    drainPerSecond: 8, // while sowing over the meadow
-  },
-  orbs: {
-    clusters: 3,
-    clusterDistance: [88, 108], // from the meadow's centre
-    perCluster: 14,
-    clusterSpread: 7,
-    heights: [3, 7], // orbs float at varied heights so altitude matters
-    value: 10,
-    respawn: 25, // seconds
-    pickupRadius: 1.5,
-  },
   multipliers: {
-    pickupRadius: 2,
-    bloom: 1.5, // seeding and feeding strength
-    wings: 1.6, // sparkle spread
-    thrift: 0.7, // magic drain
-    well: 1.5, // magic capacity
+    pickupRadius: 2.2,
+    flow: 1.4, // sparkles per second
+    bloom: 1.4, // seeding and feeding strength of each sparkle
+    wings: 1.4, // sparkle spread
+    swift: 1.15, // flight speed
+  },
+  crystals: {
+    initial: 6,
+    max: 6, // live at once
+    spawnEvery: 14, // seconds between new crystals while below max
+    ring: [15, 85], // distance from the meadow's centre; the far ones sit out over barren land
+    heights: [3, 6.5],
   },
   blight: {
     fieldSize: 160, // world units the blight grid covers, centred on the meadow

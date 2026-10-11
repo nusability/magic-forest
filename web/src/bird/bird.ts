@@ -52,6 +52,8 @@ export class Bird {
   readonly root = new THREE.Group();
   readonly velocity = new THREE.Vector3();
   heading = 0; // yaw in radians; 0 flies towards -z
+  /** Multiplies TUNING.flight.speed; raised by swift crystals. */
+  speedFactor = 1;
   private yawRate = 0;
   private elapsed = 0;
 
@@ -192,7 +194,8 @@ export class Bird {
     const targetY = f.baseHeight + steer.y * f.heightRange;
     const prevY = p.y;
     p.y += (targetY - p.y) * ease;
-    this.velocity.set(-Math.sin(this.heading) * f.speed, (p.y - prevY) / dt, -Math.cos(this.heading) * f.speed);
+    const speed = f.speed * this.speedFactor;
+    this.velocity.set(-Math.sin(this.heading) * speed, (p.y - prevY) / dt, -Math.cos(this.heading) * speed);
     p.x += this.velocity.x * dt;
     p.z += this.velocity.z * dt;
 

@@ -42,6 +42,11 @@ one choice: detour to collect amplifiers and multipliers that make their sparkle
 faster, or wider, or keep sowing the ground below. The feeling to aim for is calm,
 generous wonder, with a quiet thread of smart decisions running through it.
 
+**Presentation**: all game chrome is drawn inside the game world, never with platform UI
+(no web overlays, SwiftUI or Compose chrome). It is ephemeral and minimal: icons only, no
+text, and no progress bars. Progress is shown through fitting in-world metaphors, and any
+indicator fades back when it has nothing new to say.
+
 **Elevator pitch**: Fly a magic bird whose sparkles grow a glowing forest branch by branch, and choose when to chase power-ups to grow it to the level's goal.
 
 **Target player**: {{WHO, WHEN, HOW LONG PER SESSION}}
