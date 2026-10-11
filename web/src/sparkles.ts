@@ -60,6 +60,8 @@ export class Sparkles {
   private readonly alpha: Float32Array;
   private readonly star: Float32Array;
   private readonly age: Float32Array;
+  private readonly startY: Float32Array; // height the sparkle left the bird at
+  private readonly vigour: Float32Array;
   private readonly landedAt: Float32Array; // age at landing, or -1 while airborne
   private readonly seeds: Uint8Array;
   private readonly alive: Uint8Array;
@@ -68,7 +70,8 @@ export class Sparkles {
   /** Sparkles alive after the last update, for the stats overlay. */
   liveCount = 0;
 
-  constructor(private readonly onLand: (x: number, z: number) => void) {
+  /** onLand gets the sparkle's remaining vigour (0..1], which weakens with the height fallen. */
+  constructor(private readonly onLand: (x: number, z: number, vigour: number) => void) {
     const n = TUNING.sparkles.max;
     this.position = new Float32Array(n * 3);
     this.velocity = new Float32Array(n * 3);
@@ -77,6 +80,8 @@ export class Sparkles {
     this.alpha = new Float32Array(n);
     this.star = new Float32Array(n);
     this.age = new Float32Array(n);
+    this.startY = new Float32Array(n);
+    this.vigour = new Float32Array(n);
     this.landedAt = new Float32Array(n);
     this.seeds = new Uint8Array(n);
     this.alive = new Uint8Array(n);
@@ -116,6 +121,8 @@ export class Sparkles {
     this.star[i] = e.star ? 1 : 0;
     this.alpha[i] = 1;
     this.age[i] = 0;
+    this.startY[i] = e.position.y;
+    this.vigour[i] = 1;
     this.landedAt[i] = -1;
     this.seeds[i] = e.seeds ? 1 : 0;
     this.alive[i] = 1;
@@ -134,7 +141,7 @@ export class Sparkles {
       const p = i * 3;
       if (this.landedAt[i] >= 0) {
         const glow = 1 - (this.age[i] - this.landedAt[i]) / s.groundGlow;
-        this.alpha[i] = Math.max(glow, 0);
+        this.alpha[i] = Math.max(glow, 0) * this.vigour[i];
         if (glow <= 0) this.kill(i);
         continue;
       }
@@ -144,14 +151,17 @@ export class Sparkles {
       this.position[p] += this.velocity[p] * dt;
       this.position[p + 1] += this.velocity[p + 1] * dt;
       this.position[p + 2] += this.velocity[p + 2] * dt;
-      if (this.position[p + 1] <= 0) {
+      const fallen = this.startY[i] - this.position[p + 1];
+      this.vigour[i] = 1 - THREE.MathUtils.smoothstep(fallen, s.fadeDrop[0], s.fadeDrop[1]);
+      if (this.vigour[i] <= 0 || this.age[i] > s.life) {
+        this.kill(i);
+      } else if (this.position[p + 1] <= 0) {
         this.position[p + 1] = 0.02;
         this.landedAt[i] = this.age[i];
-        if (this.seeds[i]) this.onLand(this.position[p], this.position[p + 2]);
-      } else if (this.age[i] > s.life) {
-        this.kill(i);
+        if (this.seeds[i]) this.onLand(this.position[p], this.position[p + 2], this.vigour[i]);
       } else {
-        this.alpha[i] = Math.min(1, (s.life - this.age[i]) * 2); // fade over the last half second
+        // Fade with lost vigour, and over the last half second of life.
+        this.alpha[i] = Math.min(this.vigour[i], (s.life - this.age[i]) * 2);
       }
     }
     const attrs = this.points.geometry.attributes;

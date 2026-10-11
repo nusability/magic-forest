@@ -95,9 +95,9 @@ function burst(at: THREE.Vector3, color: THREE.Color, count: number): void {
 const forest = new Forest((at, color) => burst(at, color, TUNING.growth.blossomBurst));
 scene.add(forest.group);
 
-const sparkles = new Sparkles((x, z) => {
-  if (blight.isBlighted(x, z)) blight.cleanse(x, z, TUNING.blight.cleansePerSparkle);
-  else if (isFertile(x, z)) forest.land(x, z, game.factor('bloom'));
+const sparkles = new Sparkles((x, z, vigour) => {
+  if (blight.isBlighted(x, z)) blight.cleanse(x, z, TUNING.blight.cleansePerSparkle * vigour);
+  else if (isFertile(x, z)) forest.land(x, z, game.factor('bloom') * vigour);
 });
 sparkles.setViewport(renderer.domElement.height, FOV);
 scene.add(sparkles.points);
@@ -164,11 +164,14 @@ const lookTarget = new THREE.Vector3();
 function updateCamera(dt: number, snap: boolean): void {
   const c = TUNING.camera;
   bird.forward(forward);
-  cameraTarget.copy(bird.root.position).addScaledVector(forward, -c.behind).setY(bird.root.position.y + c.above);
+  const lift = bird.root.position.y - TUNING.flight.startHeight;
+  cameraTarget.copy(bird.root.position).addScaledVector(forward, -(c.behind + lift * c.behindPerHeight));
+  cameraTarget.y = bird.root.position.y + c.above + lift * c.abovePerHeight;
   if (snap) camera.position.copy(cameraTarget);
   else camera.position.lerp(cameraTarget, 1 - Math.exp(-c.follow * dt));
-  lookTarget.copy(bird.root.position).addScaledVector(forward, c.lookAhead);
-  lookTarget.y -= c.lookBelow;
+  const rise = Math.max(lift, 0);
+  lookTarget.copy(bird.root.position).addScaledVector(forward, c.lookAhead + rise * c.lookAheadPerHeight);
+  lookTarget.y -= c.lookBelow + rise * c.lookBelowPerHeight;
   camera.lookAt(lookTarget);
 }
 updateCamera(0, true);

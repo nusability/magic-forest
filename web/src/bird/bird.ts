@@ -55,6 +55,7 @@ export class Bird {
   /** Multiplies TUNING.flight.speed; raised by swift crystals. */
   speedFactor = 1;
   private yawRate = 0;
+  private climbRate = 0;
   private elapsed = 0;
 
   private readonly body = new THREE.Group(); // pitches with the climb and bobs with the stroke
@@ -90,7 +91,7 @@ export class Bird {
 
   constructor() {
     this.root.rotation.order = 'YXZ'; // yaw, then roll about the bird's own axis
-    this.root.position.y = TUNING.flight.baseHeight;
+    this.root.position.y = TUNING.flight.startHeight;
     this.root.add(this.body);
     this.body.scale.setScalar(BIRD_SCALE);
 
@@ -182,7 +183,7 @@ export class Bird {
     this.root.updateMatrixWorld(true);
   }
 
-  /** steer.x in [-1, 1] turns (right is positive); steer.y in [-1, 1] climbs. */
+  /** steer.x in [-1, 1] turns (right is positive); steer.y in [-1, 1] climbs or dives; 0 holds altitude. */
   update(dt: number, steer: THREE.Vector2): void {
     const f = TUNING.flight;
     this.elapsed += dt;
@@ -191,9 +192,9 @@ export class Bird {
     this.heading += this.yawRate * dt;
 
     const p = this.root.position;
-    const targetY = f.baseHeight + steer.y * f.heightRange;
+    this.climbRate += (steer.y * f.climbRate - this.climbRate) * ease;
     const prevY = p.y;
-    p.y += (targetY - p.y) * ease;
+    p.y = THREE.MathUtils.clamp(p.y + this.climbRate * dt, f.minHeight, f.maxHeight);
     const speed = f.speed * this.speedFactor;
     this.velocity.set(-Math.sin(this.heading) * speed, (p.y - prevY) / dt, -Math.cos(this.heading) * speed);
     p.x += this.velocity.x * dt;

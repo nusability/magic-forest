@@ -3,8 +3,10 @@
 export const TUNING = {
   flight: {
     speed: 8, // world units per second, before swift crystals
-    baseHeight: 4.5,
-    heightRange: 2, // a full vertical drag moves the target altitude by this much
+    startHeight: 4.5,
+    minHeight: 2.5,
+    maxHeight: 35, // high enough to look out over the whole meadow
+    climbRate: 9, // world units per second at a full vertical drag; letting go holds altitude
     maxYawRate: 1.7, // radians per second at a full sideways drag
     steerEase: 3, // how quickly yaw rate and altitude follow the finger (1/s)
     bankPerYawRate: 0.45, // radians of roll per radian/s of turning
@@ -17,6 +19,12 @@ export const TUNING = {
     lookAhead: 4,
     lookBelow: 0.6,
     follow: 5, // 1/s
+    // Per unit of altitude above the start height: the camera backs off and looks further
+    // down, so climbing becomes an overview of the meadow.
+    behindPerHeight: 0.12,
+    abovePerHeight: 0.1,
+    lookAheadPerHeight: 0.5,
+    lookBelowPerHeight: 0.25,
   },
   sparkles: {
     perSecond: 30, // at the start; flow crystals raise it
@@ -30,6 +38,9 @@ export const TUNING = {
     starSize: 0.28,
     life: 4, // seconds before a sparkle that never landed fades out
     groundGlow: 0.7, // seconds a landed sparkle glows on the ground
+    // Sparkles weaken as they fall: full strength for this drop, gone by the second. Flying
+    // high gives a view but sows nothing.
+    fadeDrop: [6, 14],
   },
   seeding: {
     chance: 0.35, // chance a sparkle landing on open ground seeds a plant
