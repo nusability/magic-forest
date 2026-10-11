@@ -29,7 +29,7 @@ export const TUNING = {
     lookBelowPerHeight: 0.3,
     // The gaze swings into a turn by this many world units per radian/second of turning,
     // towards where the loop you're closing lies.
-    lookIntoTurn: 2.5,
+    lookIntoTurn: 1.2,
   },
   sparkles: {
     perSecond: 30, // at the start; flow crystals raise it
