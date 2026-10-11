@@ -33,16 +33,18 @@ export const TUNING = {
   },
   seeding: {
     chance: 0.35, // chance a sparkle landing on open ground seeds a plant
-    feedBoost: 0.18, // growth-rate boost a sparkle gives the plant it lands on
-    maxBoost: 3,
+    feedBoost: 0.08, // growth-rate boost a sparkle gives the plant it lands on
+    maxBoost: 1, // at most double speed, so growth is still there to watch after a turn
     boostDecay: 1.5, // seconds (time constant)
     kinds: { tree: 0.35, shrub: 0.35, flower: 0.3 },
   },
   growth: {
-    extendSpeed: 1.4, // world units of branch per second of plant growth
-    leafUnfurl: 0.9, // seconds
-    budSwell: 0.6,
-    blossomOpen: 1.3,
+    // Slow enough that a plant sown on one pass is still growing when you turn back to it:
+    // a tree takes about 15 s from sprout to full bloom.
+    extendSpeed: 0.45, // world units of branch per second of plant growth
+    leafUnfurl: 2.5, // seconds
+    budSwell: 1.8,
+    blossomOpen: 3.5,
     blossomBurst: 6, // sparkles a blossom releases when it opens
   },
   forest: {
@@ -50,6 +52,14 @@ export const TUNING = {
     maxLeaves: 50000,
     maxPetals: 40000,
     maxCores: 8000,
+  },
+  ground: {
+    size: 600,
+    textureTile: 12, // world units one repeat of the soil texture covers
+    // Grass and bushes are drawn in one tile centred this far ahead of the camera.
+    lookAhead: 20,
+    grass: { tile: 60, count: 40000, clumps: 1600, clumpRadius: 0.9, height: 0.35, width: 0.06, sway: 0.06 },
+    bushes: { tile: 70, count: 110, size: 0.75 },
   },
   bloom: { strength: 0.7, radius: 0.4, threshold: 0.75 },
 } as const;

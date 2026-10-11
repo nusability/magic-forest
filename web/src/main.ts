@@ -5,6 +5,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Bird } from './bird';
 import { Forest } from './forest';
+import { Ground } from './ground';
 import { Sparkles } from './sparkles';
 import { SKY, SPARKLE_COLORS, TUNING } from './tuning';
 
@@ -12,7 +13,6 @@ import { SKY, SPARKLE_COLORS, TUNING } from './tuning';
 // forest grows. Drag sideways to turn and up or down to climb or dive; let go to fly straight.
 
 const FOV = 60;
-const GROUND_SIZE = 600;
 const DRAG_FULL_SCALE = { x: 0.35, y: 0.3 }; // share of the screen a drag must cover for full steer
 const BURST_SPEED = { up: 1.6, scatter: 1.2 };
 // Frames longer than this (a backgrounded tab) are clamped so nothing teleports.
@@ -34,12 +34,9 @@ const moon = new THREE.DirectionalLight(0xffe9c4, 1.4);
 moon.position.set(-4, 10, 6);
 scene.add(moon);
 
-const ground = new THREE.Mesh(
-  new THREE.PlaneGeometry(GROUND_SIZE, GROUND_SIZE),
-  new THREE.MeshStandardMaterial({ color: 0x23402f, roughness: 1 }),
-);
-ground.rotation.x = -Math.PI / 2;
-scene.add(ground);
+const ground = new Ground();
+scene.add(ground.group);
+const groundCenter = new THREE.Vector3();
 
 const bird = new Bird();
 scene.add(bird.root);
@@ -144,5 +141,6 @@ renderer.setAnimationLoop((timestamp) => {
   sparkles.update(dt);
   forest.update(dt);
   updateCamera(dt, false);
+  ground.update(dt, groundCenter.copy(camera.position).addScaledVector(forward, TUNING.ground.lookAhead));
   composer.render();
 });
