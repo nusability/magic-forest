@@ -25,9 +25,23 @@ const FOV = 60;
 const DRAG_FULL_SCALE = { x: 0.35, y: 0.3 }; // share of the screen a drag must cover for full steer
 const BURST_SPEED = { up: 1.6, scatter: 1.2 };
 const MOON_DISTANCE = 100; // only the direction matters for a directional light
+const DOUBLE_TAP_MS = 350;
 const REPLAY_DELAY_S = 1.5; // so a tap still in progress at the end doesn't restart at once
 // Frames longer than this (a backgrounded tab) are clamped so nothing teleports.
 const MAX_FRAME_SECONDS = 0.1;
+
+// iOS Safari ignores user-scalable=no and touch-action for some gestures (pinch, double-tap,
+// long-press selection), so those are cancelled at the source as well.
+for (const type of ['gesturestart', 'gesturechange', 'dblclick', 'contextmenu', 'selectstart']) {
+  document.addEventListener(type, (e) => e.preventDefault(), { passive: false });
+}
+document.addEventListener('touchmove', (e) => e.preventDefault(), { passive: false });
+let lastTouchEnd = 0;
+document.addEventListener('touchend', (e) => {
+  const now = performance.now();
+  if (now - lastTouchEnd < DOUBLE_TAP_MS) e.preventDefault(); // the second tap of a double-tap would zoom
+  lastTouchEnd = now;
+}, { passive: false });
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -54,7 +68,7 @@ scene.add(ground.group);
 const groundCenter = new THREE.Vector3();
 
 const game = new Game();
-const chrome = new Chrome();
+const chrome = new Chrome(blight.texture);
 camera.add(chrome.overlay);
 scene.add(chrome.world);
 chrome.layout(camera);
@@ -191,7 +205,7 @@ renderer.setAnimationLoop((timestamp) => {
   sky.update(dt, camera.position);
   ground.update(dt, groundCenter.copy(camera.position).addScaledVector(forward, TUNING.ground.lookAhead));
   const l = TUNING.level;
-  chrome.update(dt, p, blight.forestShare, l.target, blight.blightShare, l.loseAt, game.status);
+  chrome.update(dt, p, bird.heading, blight.forestShare, l.target, blight.blightShare, l.loseAt, game.status, (visit) => crystals.forEachLive(visit));
   composer.render();
   stats.frame(dt, { renderer, plants: forest.plantCount, sparkles: sparkles.liveCount });
 });

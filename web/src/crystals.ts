@@ -24,11 +24,15 @@ const BEAM = { radius: 1.2, height: 140, strength: 0.32 };
 const beamVertex = /* glsl */ `
   varying float vHeight;
   varying float vRim;
+  varying float vNear;
   void main() {
     vHeight = uv.y;
     vec3 n = normalize(normalMatrix * normal);
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
     vRim = abs(dot(n, normalize(-mv.xyz)));
+    // Seen from close by or from inside, a beam would be a wall of light; it fades out instead.
+    vec3 axis = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+    vNear = smoothstep(4.0, 16.0, length(cameraPosition.xz - axis.xz));
     gl_Position = projectionMatrix * mv;
   }
 `;
@@ -39,8 +43,9 @@ const beamFragment = /* glsl */ `
   uniform float uStrength;
   varying float vHeight;
   varying float vRim;
+  varying float vNear;
   void main() {
-    float a = pow(1.0 - vHeight, 3.0) * pow(vRim, 2.0) * uStrength;
+    float a = pow(1.0 - vHeight, 3.0) * pow(vRim, 2.0) * uStrength * vNear;
     gl_FragColor = vec4(uColor * a, 1.0);
   }
 `;
@@ -89,6 +94,11 @@ export class Crystals {
     beam.position.set(home.x, 0, home.z);
     this.group.add(gem, beam);
     this.live.push({ kind, home, phase: Math.random() * Math.PI * 2, gem, beam });
+  }
+
+  /** The crystals currently waiting to be collected. */
+  forEachLive(visit: (kind: CrystalKind, at: THREE.Vector3) => void): void {
+    for (const c of this.live) visit(c.kind, c.home);
   }
 
   private remove(c: Crystal): void {
