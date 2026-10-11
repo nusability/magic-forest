@@ -15,7 +15,7 @@ export const TUNING = {
     behind: 5.5,
     above: 2.4,
     lookAhead: 4,
-    lookBelow: 1.2,
+    lookBelow: 0.6,
     follow: 4, // 1/s
   },
   sparkles: {
@@ -48,18 +48,60 @@ export const TUNING = {
     blossomBurst: 6, // sparkles a blossom releases when it opens
   },
   forest: {
-    maxSegments: 30000,
-    maxLeaves: 50000,
-    maxPetals: 40000,
-    maxCores: 8000,
+    maxSegments: 80000,
+    maxLeaves: 120000,
+    maxPetals: 90000,
+    maxCores: 18000,
   },
   ground: {
-    size: 600,
+    size: 8000, // big enough that its edge sits behind the distant hills
     textureTile: 12, // world units one repeat of the soil texture covers
     // Grass and bushes are drawn in one tile centred this far ahead of the camera.
     lookAhead: 20,
     grass: { tile: 60, count: 40000, clumps: 1600, clumpRadius: 0.9, height: 0.35, width: 0.06, sway: 0.06 },
     bushes: { tile: 70, count: 110, size: 0.75 },
+    rocks: { count: 700, innerGap: 3, outerRadius: 450, size: 0.6 },
+  },
+  view: {
+    far: 5000,
+    hills: { inner: 1500, outer: 2400, height: 170, segments: 320 },
+  },
+  level: {
+    fertileRadius: 60, // the meadow the magic can take root in; beyond it lies barren land
+    edgeNoise: 5, // how ragged the meadow's edge is, in world units
+    target: 0.22, // share of the meadow that must be forest to win
+    loseAt: 0.6, // share of the meadow the blight must take to lose
+  },
+  magic: {
+    capacity: 100,
+    start: 100,
+    drainPerSecond: 8, // while sowing over the meadow
+  },
+  orbs: {
+    clusters: 3,
+    clusterDistance: [88, 108], // from the meadow's centre
+    perCluster: 14,
+    clusterSpread: 7,
+    heights: [3, 7], // orbs float at varied heights so altitude matters
+    value: 10,
+    respawn: 25, // seconds
+    pickupRadius: 1.5,
+  },
+  multipliers: {
+    pickupRadius: 2,
+    bloom: 1.5, // seeding and feeding strength
+    wings: 1.6, // sparkle spread
+    thrift: 0.7, // magic drain
+    well: 1.5, // magic capacity
+  },
+  blight: {
+    fieldSize: 160, // world units the blight grid covers, centred on the meadow
+    cells: 128,
+    tick: 0.2, // seconds between spread steps
+    spreadRate: 0.3, // blight gained per second by a cell with a blighted neighbour
+    startRadius: 9,
+    cleansePerSparkle: 0.12,
+    coverAt: 0.35, // growth a plant needs before its ground counts as forest
   },
   bloom: { strength: 0.7, radius: 0.4, threshold: 0.75 },
 } as const;
@@ -67,4 +109,3 @@ export const TUNING = {
 export const SPARKLE_COLORS = [0xff7ad9, 0xffd36e, 0x7af0ff, 0xb48cff, 0x9effa1];
 export const BLOSSOM_COLORS = [0xff6ec7, 0xffd56e, 0x6ef5ff, 0xb98cff, 0xff8a6e, 0xd9a8ff];
 export const LEAF_COLORS = [0x3fd9a0, 0x7affc1, 0x2fae6a, 0x3fb7c9, 0x8fe06a];
-export const SKY = 0x140b2e;

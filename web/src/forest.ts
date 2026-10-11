@@ -143,20 +143,28 @@ export class Forest {
     for (const pool of [this.segments, this.leaves, this.petals, this.cores]) this.group.add(pool.mesh);
   }
 
+  /** Reports every plant grown enough for its ground to count as forest. */
+  forEachGrown(minGrowth: number, visit: (x: number, z: number, radius: number) => void): void {
+    for (const p of this.plants) if (p.age >= p.plan.end * minGrowth) visit(p.x, p.z, p.plan.footprint);
+  }
+
   get plantCount(): number {
     return this.plants.length;
   }
 
-  /** A seeding sparkle touched the ground: feed the plant it fell on, or maybe start one. */
-  land(x: number, z: number): void {
+  /**
+   * A seeding sparkle touched the ground: feed the plant it fell on, or maybe start one.
+   * `strength` scales both, so a bloom multiplier makes every sparkle count for more.
+   */
+  land(x: number, z: number, strength: number): void {
     const sd = TUNING.seeding;
     for (const p of this.plants) {
       if ((p.x - x) ** 2 + (p.z - z) ** 2 < p.plan.footprint ** 2) {
-        p.boost = Math.min(sd.maxBoost, p.boost + sd.feedBoost);
+        p.boost = Math.min(sd.maxBoost, p.boost + sd.feedBoost * strength);
         return;
       }
     }
-    if (Math.random() < sd.chance) this.seed(this.pickKind(), x, z);
+    if (Math.random() < sd.chance * strength) this.seed(this.pickKind(), x, z);
   }
 
   private pickKind(): PlantKind {

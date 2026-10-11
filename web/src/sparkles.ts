@@ -65,6 +65,8 @@ export class Sparkles {
   private readonly alive: Uint8Array;
   private next = 0;
   private time = 0;
+  /** Sparkles alive after the last update, for the stats overlay. */
+  liveCount = 0;
 
   constructor(private readonly onLand: (x: number, z: number) => void) {
     const n = TUNING.sparkles.max;
@@ -124,8 +126,10 @@ export class Sparkles {
     this.time += dt;
     this.material.uniforms.uTime.value = this.time;
     const dragFactor = Math.exp(-s.drag * dt);
+    this.liveCount = 0;
     for (let i = 0; i < s.max; i++) {
       if (!this.alive[i]) continue;
+      this.liveCount++;
       this.age[i] += dt;
       const p = i * 3;
       if (this.landedAt[i] >= 0) {
